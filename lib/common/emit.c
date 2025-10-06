@@ -1,3 +1,4 @@
+// clang-format off
 /**
  * @file
  * @brief graphics code generator
@@ -1112,7 +1113,7 @@ static void init_layering(GVC_t * gvc, graph_t * g)
 }
 
 /// Return number of physical layers to be emitted.
-static int numPhysicalLayers (GVJ_t *job)
+int numPhysicalLayers (GVJ_t *job)
 {
     if (job->gvc->layerlist) {
 	return job->gvc->layerlist[0];
@@ -1122,7 +1123,7 @@ static int numPhysicalLayers (GVJ_t *job)
 
 }
 
-static void firstlayer(GVJ_t *job, int** listp)
+void firstlayer(GVJ_t *job, int** listp)
 {
     job->numLayers = job->gvc->numLayers;
     if (job->gvc->layerlist) {
@@ -1147,12 +1148,12 @@ static void firstlayer(GVJ_t *job, int** listp)
     }
 }
 
-static bool validlayer(GVJ_t *job)
+bool validlayer(GVJ_t *job)
 {
     return job->layerNum <= job->numLayers;
 }
 
-static void nextlayer(GVJ_t *job, int** listp)
+void nextlayer(GVJ_t *job, int** listp)
 {
     int *list = *listp;
     if (list) {
@@ -1299,12 +1300,12 @@ static void init_job_pagination(GVJ_t * job, graph_t *g)
     }
 }
 
-static void firstpage(GVJ_t *job)
+void firstpage(GVJ_t *job)
 {
     job->pagesArrayElem = job->pagesArrayFirst;
 }
 
-static bool validpage(GVJ_t *job)
+bool validpage(GVJ_t *job)
 {
     return job->pagesArrayElem.x >= 0
 	 && job->pagesArrayElem.x < job->pagesArraySize.x
@@ -1312,7 +1313,7 @@ static bool validpage(GVJ_t *job)
 	 && job->pagesArrayElem.y < job->pagesArraySize.y;
 }
 
-static void nextpage(GVJ_t *job)
+void nextpage(GVJ_t *job)
 {
     job->pagesArrayElem = add_point(job->pagesArrayElem, job->pagesArrayMinor);
     if (!validpage(job)) {
@@ -3448,7 +3449,7 @@ static void emit_cluster_colors(GVJ_t * job, graph_t * g)
     }
 }
 
-static void emit_colors(GVJ_t * job, graph_t * g)
+void emit_colors(GVJ_t * job, graph_t * g)
 {
     node_t *n;
     edge_t *e;
@@ -3566,7 +3567,7 @@ static void emit_view(GVJ_t * job, graph_t * g, int flags)
 	emit_clusters(job, g, flags);
 }
 
-static void emit_begin_graph(GVJ_t * job, graph_t * g)
+void emit_begin_graph(GVJ_t * job, graph_t * g)
 {
     obj_state_t *obj;
 
@@ -3580,7 +3581,7 @@ static void emit_begin_graph(GVJ_t * job, graph_t * g)
     gvrender_begin_graph(job);
 }
 
-static void emit_end_graph(GVJ_t * job)
+void emit_end_graph(GVJ_t * job)
 {
     gvrender_end_graph(job);
     pop_obj_state(job);
@@ -3590,7 +3591,7 @@ static bool NotFirstPage(const GVJ_t *j) {
   return j->layerNum > 1 || j->pagesArrayElem.x > 0 || j->pagesArrayElem.y > 0;
 }
 
-static void emit_page(GVJ_t * job, graph_t * g)
+void emit_page(GVJ_t * job, graph_t * g)
 {
     obj_state_t *obj = job->obj;
     int flags = job->flags;
