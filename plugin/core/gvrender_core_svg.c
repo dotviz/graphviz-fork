@@ -1,3 +1,4 @@
+// clang-format off
 /*************************************************************************
  * Copyright (c) 2011 AT&T Intellectual Property 
  * All rights reserved. This program and the accompanying materials
@@ -723,7 +724,7 @@ static void svg_polyline(GVJ_t *job, pointf *A, size_t n) {
 
 /* color names from http://www.w3.org/TR/SVG/types.html */
 /* NB.  List must be LANG_C sorted */
-static char *svg_knowncolors[] = {
+char *svg_knowncolors[] = {
     "aliceblue", "antiquewhite", "aqua", "aquamarine", "azure",
     "beige", "bisque", "black", "blanchedalmond", "blue",
     "blueviolet", "brown", "burlywood",
