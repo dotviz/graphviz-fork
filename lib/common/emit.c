@@ -315,7 +315,7 @@ preprocessTooltip(char* s, void* gobj)
     return interpretCRNL (news);
 }
  
-static void
+void
 initObjMapData (GVJ_t* job, textlabel_t *lab, void* gobj)
 {
     char* lbl;
