@@ -826,32 +826,32 @@ point gvusershape_size_dpi(usershape_t *us, pointf dpi) {
  * Loads user image from file name if not already loaded.
  * Return image size in points.
  */
-point gvusershape_size(graph_t *g, char *name) {
-  point rv;
-  pointf dpi;
-  static char *oldpath;
-  usershape_t *us;
+// point gvusershape_size(graph_t *g, char *name) {
+//   point rv;
+//   pointf dpi;
+//   static char *oldpath;
+//   usershape_t *us;
 
-  /* no shape file, no shape size */
-  if (!name || (*name == '\0')) {
-    rv.x = rv.y = -1;
-    return rv;
-  }
+//   /* no shape file, no shape size */
+//   if (!name || (*name == '\0')) {
+//     rv.x = rv.y = -1;
+//     return rv;
+//   }
 
-  if (!HTTPServerEnVar && (oldpath != Gvimagepath)) {
-    oldpath = Gvimagepath;
-    if (ImageDict) {
-      dtclose(ImageDict);
-      ImageDict = NULL;
-    }
-  }
+//   if (!HTTPServerEnVar && (oldpath != Gvimagepath)) {
+//     oldpath = Gvimagepath;
+//     if (ImageDict) {
+//       dtclose(ImageDict);
+//       ImageDict = NULL;
+//     }
+//   }
 
-  if ((dpi.y = GD_drawing(g)->dpi) >= 1.0)
-    dpi.x = dpi.y;
-  else
-    dpi.x = dpi.y = DEFAULT_DPI;
+//   if ((dpi.y = GD_drawing(g)->dpi) >= 1.0)
+//     dpi.x = dpi.y;
+//   else
+//     dpi.x = dpi.y = DEFAULT_DPI;
 
-  us = gvusershape_open(name);
-  rv = gvusershape_size_dpi(us, dpi);
-  return rv;
-}
+//   us = gvusershape_open(name);
+//   rv = gvusershape_size_dpi(us, dpi);
+//   return rv;
+// }
