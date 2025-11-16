@@ -176,7 +176,7 @@ typedef union inside_t {
     } stroke_t;
 
 	typedef struct output_string_s output_string;
-	typedef struct SafeJob_s SafeJob;
+	typedef struct SafeLayer_s SafeLayer;
 	typedef struct obj_state_s obj_state_t;
 	
     typedef struct shape_functions {	/* read-only shape functions */
@@ -185,7 +185,7 @@ typedef union inside_t {
 	 port(*portfn) (node_t *, char *, char *);	/* finds aiming point and slope of port */
 	 bool(*insidefn) (inside_t * inside_context, pointf);	/* clips incident gvc->e spline on shape of gvc->n */
 	int (*pboxfn)(node_t* n, port* p, int side, boxf rv[], int *kptr); /* finds box path to reach port */
-	void (*codefn) (output_string* output, SafeJob* safe_job, obj_state_t* obj, node_t * n);	/* emits graphics code for node */
+	void (*codefn) (output_string* output, SafeLayer* safe_layer, obj_state_t* obj, node_t * n);	/* emits graphics code for node */
     } shape_functions;
 
     typedef enum { SH_UNSET, SH_POLY, SH_RECORD, SH_POINT, SH_EPSF} shape_kind;
