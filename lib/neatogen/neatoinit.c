@@ -510,86 +510,86 @@ nop_init_graphs(Agraph_t * g, attrsym_t * G_lp, attrsym_t * G_bb)
  * Returns 0 on normal success, 1 if layout has a background, and -1
  * on failure.
  */
-int init_nop(Agraph_t * g, int adjust)
-{
-    int i;
-    node_t *np;
-    pos_edge posEdges;		/* How many edges have spline info */
-    attrsym_t *G_lp = agfindgraphattr(g, "lp");
-    attrsym_t *G_bb = agfindgraphattr(g, "bb");
-    int didAdjust = 0;  /* Have nodes been moved? */
-    int haveBackground;
-    bool translate = !mapbool(agget(g, "notranslate"));
+// int init_nop(Agraph_t * g, int adjust)
+// {
+//     int i;
+//     node_t *np;
+//     pos_edge posEdges;		/* How many edges have spline info */
+//     attrsym_t *G_lp = agfindgraphattr(g, "lp");
+//     attrsym_t *G_bb = agfindgraphattr(g, "bb");
+//     int didAdjust = 0;  /* Have nodes been moved? */
+//     int haveBackground;
+//     bool translate = !mapbool(agget(g, "notranslate"));
 
-    /* If G_bb not defined, define it */
-    if (!G_bb)
-	G_bb = agattr_text(g, AGRAPH, "bb", "");
+//     /* If G_bb not defined, define it */
+//     if (!G_bb)
+// 	G_bb = agattr_text(g, AGRAPH, "bb", "");
 
-    scan_graph(g);		/* mainly to set up GD_neato_nlist */
-    for (i = 0; (np = GD_neato_nlist(g)[i]); i++) {
-	if (!hasPos(np) && !startswith(agnameof(np), "cluster")) {
-	    agerrorf("node %s in graph %s has no position\n",
-		  agnameof(np), agnameof(g));
-	    return -1;
-	}
-	if (ND_xlabel(np))
-	    set_label(np, ND_xlabel(np), "xlp");
-    }
-    nop_init_graphs(g, G_lp, G_bb);
-    posEdges = nop_init_edges(g);
+//     scan_graph(g);		/* mainly to set up GD_neato_nlist */
+//     for (i = 0; (np = GD_neato_nlist(g)[i]); i++) {
+// 	if (!hasPos(np) && !startswith(agnameof(np), "cluster")) {
+// 	    agerrorf("node %s in graph %s has no position\n",
+// 		  agnameof(np), agnameof(g));
+// 	    return -1;
+// 	}
+// 	if (ND_xlabel(np))
+// 	    set_label(np, ND_xlabel(np), "xlp");
+//     }
+//     nop_init_graphs(g, G_lp, G_bb);
+//     posEdges = nop_init_edges(g);
 
-    if (GD_drawing(g)->xdots) {
-	haveBackground = 1;
-	GD_drawing(g)->ratio_kind = R_NONE; /* Turn off any aspect change if background present */
-    }
-    else
-	haveBackground = 0;
+//     if (GD_drawing(g)->xdots) {
+// 	haveBackground = 1;
+// 	GD_drawing(g)->ratio_kind = R_NONE; /* Turn off any aspect change if background present */
+//     }
+//     else
+// 	haveBackground = 0;
 
-    if (adjust && Nop == 1 && !haveBackground)
-	didAdjust = adjustNodes(g);
+//     if (adjust && Nop == 1 && !haveBackground)
+// 	didAdjust = adjustNodes(g);
 
-    if (didAdjust) {
-	if (GD_label(g)) GD_label(g)->set = false;
-/* FIX:
- *   - if nodes are moved, clusters are no longer valid.
- */
-    }
+//     if (didAdjust) {
+// 	if (GD_label(g)) GD_label(g)->set = false;
+// /* FIX:
+//  *   - if nodes are moved, clusters are no longer valid.
+//  */
+//     }
 
-    compute_bb(g);
+//     compute_bb(g);
 
-    /* Adjust bounding box for any background */
-    if (haveBackground)
-	GD_bb(g) = xdotBB (g);
+//     /* Adjust bounding box for any background */
+//     if (haveBackground)
+// 	GD_bb(g) = xdotBB (g);
 
-    /* At this point, all bounding boxes should be correctly defined.
-     */
+//     /* At this point, all bounding boxes should be correctly defined.
+//      */
 
-    if (!adjust) {
-	node_t *n;
-	State = GVSPLINES;
-	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
-	    ND_coord(n).x = POINTS_PER_INCH * ND_pos(n)[0];
-	    ND_coord(n).y = POINTS_PER_INCH * ND_pos(n)[1];
-	}
-    }
-    else {
-	bool didShift;
-	if (translate && !haveBackground && (GD_bb(g).LL.x != 0||GD_bb(g).LL.y != 0))
-	    neato_translate (g);
-	didShift = neato_set_aspect(g);
-	/* if we have some edge positions and we either shifted or adjusted, free edge positions */
-	if (posEdges != NoEdges && (didShift || didAdjust)) {
-	    freeEdgeInfo (g);
-	    posEdges = NoEdges;
-	}
-	if (posEdges != AllEdges || Nop == 3)
-	    spline_edges0(g, false);   /* add edges */
-	else
-	    State = GVSPLINES;
-    }
+//     if (!adjust) {
+// 	node_t *n;
+// 	State = GVSPLINES;
+// 	for (n = agfstnode(g); n; n = agnxtnode(g, n)) {
+// 	    ND_coord(n).x = POINTS_PER_INCH * ND_pos(n)[0];
+// 	    ND_coord(n).y = POINTS_PER_INCH * ND_pos(n)[1];
+// 	}
+//     }
+//     else {
+// 	bool didShift;
+// 	if (translate && !haveBackground && (GD_bb(g).LL.x != 0||GD_bb(g).LL.y != 0))
+// 	    neato_translate (g);
+// 	didShift = neato_set_aspect(g);
+// 	/* if we have some edge positions and we either shifted or adjusted, free edge positions */
+// 	if (posEdges != NoEdges && (didShift || didAdjust)) {
+// 	    freeEdgeInfo (g);
+// 	    posEdges = NoEdges;
+// 	}
+// 	if (posEdges != AllEdges)
+// 	    spline_edges0(g, false);   /* add edges */
+// 	else
+// 	    State = GVSPLINES;
+//     }
 
-    return haveBackground;
-}
+//     return haveBackground;
+// }
 
 static void neato_init_graph (Agraph_t * g)
 {
@@ -1349,19 +1349,7 @@ void neato_layout(Agraph_t * g)
     pack_info pinfo;
     adjust_data am;
     double save_scale = PSinputscale;
-
-    if (Nop) {
-	int ret;
-	PSinputscale = POINTS_PER_INCH;
-	neato_init_graph(g);
-	addZ (g);
-	ret = init_nop(g, 1);
-	if (ret < 0) {
-	    agerr(AGPREV, "as required by the -n flag\n");
-	    return;
-	}
-	else gv_postprocess(g, 0);
-    } else {
+	
 	bool noTranslate = mapbool(agget(g, "notranslate"));
 	PSinputscale = get_inputscale (g);
 	neato_init_graph(g);
@@ -1438,7 +1426,7 @@ void neato_layout(Agraph_t * g)
 	    else spline_edges(g);
 	}
 	gv_postprocess(g, !noTranslate);
-    }
+    
     PSinputscale = save_scale;
 }
 
