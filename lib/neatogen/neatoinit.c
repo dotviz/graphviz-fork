@@ -48,9 +48,9 @@
 #include <util/strcasecmp.h>
 #include <util/streq.h>
 
-#ifndef HAVE_SRAND48
-#define srand48 srand
-#endif
+// #ifndef HAVE_SRAND48
+// #define srand48 srand
+// #endif
 
 static attrsym_t *N_pos;
 static int Pack;		/* If >= 0, layout components separately and pack together
