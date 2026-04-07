@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include <util/alloc.h>
 #include <util/exit.h>
 #include <util/list.h>
@@ -80,6 +81,177 @@ static int add_tree_edge(network_simplex_ctx_t *ctx, edge_t * e)
 	return -1;
     }
     return 0;
+}
+
+/* set cut value of f, assuming values of edges on one side were already set */
+static void x_cutval(edge_t * f)
+{
+    node_t *v;
+    edge_t *e;
+    int i, sum, dir;
+
+    /* set v to the node on the side of the edge already searched */
+    if (ND_par(agtail(f)) == f) {
+	v = agtail(f);
+	dir = 1;
+    } else {
+	v = aghead(f);
+	dir = -1;
+    }
+
+    sum = 0;
+    for (i = 0; (e = ND_out(v).list[i]); i++)
+	if (sadd_overflow(sum, x_val(e, v, dir), &sum)) {
+	    agerrorf("overflow when computing edge weight sum\n");
+	    graphviz_exit(EXIT_FAILURE);
+	}
+    for (i = 0; (e = ND_in(v).list[i]); i++)
+	if (sadd_overflow(sum, x_val(e, v, dir), &sum)) {
+	    agerrorf("overflow when computing edge weight sum\n");
+	    graphviz_exit(EXIT_FAILURE);
+	}
+    ED_cutvalue(f) = sum;
+}
+
+typedef struct {
+    node_t *v;
+    edge_t *par;
+    uint8_t visited;
+} DfsCutvalSpace;
+
+typedef struct {
+    DfsCutvalSpace *data;
+    size_t len;
+    size_t capacity;
+} DfsCutvalStack;
+
+DfsCutvalStack *new_dfsc_stack(size_t capacity) {
+    DfsCutvalStack *stack = malloc(sizeof(DfsCutvalStack));
+    
+    if (!stack) return NULL;
+
+    stack->data = malloc(sizeof(DfsCutvalSpace) * capacity);
+    
+    if (!stack->data && capacity > 0) {
+        free(stack);
+        return NULL;
+    }
+
+    stack->len = 0;
+    stack->capacity = capacity;
+
+    return stack;
+}
+
+void free_dfsc_stack(DfsCutvalStack *stack) {
+    if (!stack) return;
+    
+    if (stack->data) {
+        free(stack->data);
+    }
+    
+    free(stack);
+}
+
+int push_dfsc_stack(DfsCutvalStack *stack, DfsCutvalSpace item) {
+    if (stack->len == stack->capacity) {
+        size_t new_cap = (stack->capacity == 0) ? 1 : stack->capacity * 2;
+        
+        DfsCutvalSpace *new_data = realloc(stack->data, new_cap * sizeof(DfsCutvalSpace));
+        
+        if (!new_data) {
+            return -1;
+        }
+        
+        stack->data = new_data;
+        stack->capacity = new_cap;
+    }
+
+    stack->data[stack->len] = item;
+    stack->len += 1;
+
+    return 0;
+}
+
+int pop_dfsc_stack(DfsCutvalStack *stack, DfsCutvalSpace *item) {
+    if (stack->len == 0) {
+        return -1;
+    }
+    else {
+        *item = stack->data[(stack->len) - 1];
+        stack->len -= 1;
+        return 0;
+    }
+}
+
+static void dfs_cutval(node_t * v, edge_t * par)
+{
+    int i;
+    edge_t *e;
+
+    for (i = 0; (e = ND_tree_out(v).list[i]); i++)
+	if (e != par)
+	    dfs_cutval(aghead(e), e);
+    for (i = 0; (e = ND_tree_in(v).list[i]); i++)
+	if (e != par)
+	    dfs_cutval(agtail(e), e);
+    if (par)
+	x_cutval(par);
+}
+
+static void dfs_cutval_iter(node_t * v, edge_t * par, DfsCutvalStack *stack)
+{    
+    push_dfsc_stack(stack, (DfsCutvalSpace) {
+        .v = v,
+        .par = par,
+        .visited = false
+    });
+
+    while (stack->len != 0) {
+        int i;
+        edge_t *e;
+        DfsCutvalSpace item;
+
+        pop_dfsc_stack(stack, &item);
+
+        if (!item.visited) {
+            item.visited = true;
+            push_dfsc_stack(stack, item);
+            
+            for (i = 0; (e = ND_tree_out(item.v).list[i]); i++) {
+                if (e != item.par) {
+                    push_dfsc_stack(stack, (DfsCutvalSpace) {
+                        .v = aghead(e),
+                        .par = e,
+                        .visited = false
+                    });
+                }
+            }
+            for (i = 0; (e = ND_tree_in(item.v).list[i]); i++) {
+                if (e != item.par) {
+                    push_dfsc_stack(stack, (DfsCutvalSpace) {
+                        .v = agtail(e),
+                        .par = e,
+                        .visited = false
+                    });
+                }
+            }
+        } else {
+            if (item.par)
+                x_cutval(item.par);
+        }
+    }
+}
+
+static void init_cutvalues(network_simplex_ctx_t *ctx)
+{
+    DfsCutvalStack *stack = new_dfsc_stack(2);
+    assert(stack);
+
+    dfs_range_init(GD_nlist(ctx->G));
+    dfs_cutval_iter(GD_nlist(ctx->G), NULL, stack);
+    
+    free_dfsc_stack(stack);
 }
 
 /**
@@ -300,12 +472,6 @@ static edge_t *enter_edge(edge_t *e) {
     return dfs_enter_inedge(v, ND_low(v), ND_lim(v));
 }
 
-static void init_cutvalues(network_simplex_ctx_t *ctx)
-{
-    dfs_range_init(GD_nlist(ctx->G));
-    dfs_cutval(GD_nlist(ctx->G), NULL);
-}
-
 /* functions for initial tight tree construction */
 // borrow field from network simplex - overwritten in init_cutvalues() forgive me
 #define ND_subtree(n) (subtree_t*)ND_par(n)
@@ -491,10 +657,266 @@ static Agedge_t *inter_tree_edge_search(Agnode_t *v, Agnode_t *from, Agedge_t *b
     return best;
 }
 
+//typedef struct {
+//    Agnode_t *v;
+//    Agnode_t *from;
+//} IntTreeEdgeSpace;
+
+typedef struct {
+    Agnode_t *v;
+    Agnode_t *from;
+    int out_i;
+    int in_i;
+    bool processing_out;
+} IntTreeEdgeSpace;
+
+typedef struct {
+    IntTreeEdgeSpace *data;
+    size_t len;
+    size_t capacity;
+} IntTreeEdgeStack;
+
+IntTreeEdgeStack *new_ite_stack(size_t capacity) {
+    IntTreeEdgeStack *stack = malloc(sizeof(IntTreeEdgeStack));
+    
+    if (!stack) return NULL;
+
+    stack->data = malloc(sizeof(IntTreeEdgeSpace) * capacity);
+    
+    if (!stack->data && capacity > 0) {
+        free(stack);
+        return NULL;
+    }
+
+    stack->len = 0;
+    stack->capacity = capacity;
+
+    return stack;
+}
+
+void free_ite_stack(IntTreeEdgeStack *stack) {
+    if (!stack) return;
+    
+    if (stack->data) {
+        free(stack->data);
+    }
+    
+    free(stack);
+}
+
+int push_ite_stack(IntTreeEdgeStack *stack, IntTreeEdgeSpace item) {
+    if (stack->len == stack->capacity) {
+        size_t new_cap = (stack->capacity == 0) ? 1 : stack->capacity * 2;
+        
+        IntTreeEdgeSpace *new_data = realloc(stack->data, new_cap * sizeof(IntTreeEdgeSpace));
+        
+        if (!new_data) {
+            return -1;
+        }
+        
+        stack->data = new_data;
+        stack->capacity = new_cap;
+    }
+
+    stack->data[stack->len] = item;
+    stack->len += 1;
+
+    return 0;
+}
+
+int pop_ite_stack(IntTreeEdgeStack *stack, IntTreeEdgeSpace *item) {
+    if (stack->len == 0) {
+        return -1;
+    }
+    else {
+        *item = stack->data[(stack->len) - 1];
+        stack->len -= 1;
+        return 0;
+    }
+}
+int last_ite_stack(IntTreeEdgeStack *stack, IntTreeEdgeSpace **item) {
+    if (stack->len == 0) {
+        return -1;
+    }
+    else {
+        *item = &stack->data[stack->len - 1];
+        return 0;
+    }
+}
+
+int remove_last_ite_stack(IntTreeEdgeStack *stack) {
+    if (stack->len == 0) {
+        return -1;
+    }
+    else {
+        stack->len -= 1;
+        return 0;
+    }
+}
+
+//static Agedge_t* search2(IntTreeEdgeStack *stack, Agnode_t *v, Agnode_t *from, Agedge_t *best)
+//{
+//    Agedge_t *e;
+//    subtree_t *ts = STsetFind(v);
+//
+//    for (int i = 0; (e = ND_out(v).list[i]); i++) {
+//      if (TREE_EDGE(e)) {
+//          if (aghead(e) == from) continue;
+//
+//          IntTreeEdgeSpace item;
+//          item.v = aghead(e);
+//          item.from = v;
+//          push_ite_stack(stack, item);
+//      }
+//      else {
+//        if (STsetFind(aghead(e)) != ts && (best == 0 || SLACK(e) < SLACK(best))) {
+//            best = e;
+//        }
+//      }
+//    }
+//
+//    for (int i = 0; (e = ND_in(v).list[i]); i++) {
+//      if (TREE_EDGE(e)) {
+//          if (agtail(e) == from) continue;
+//
+//          IntTreeEdgeSpace item;
+//          item.v = agtail(e);
+//          item.from = v;
+//          push_ite_stack(stack, item);
+//      }
+//      else {
+//        if (STsetFind(agtail(e)) != ts && (best == 0 || SLACK(e) < SLACK(best))) {
+//            best = e;
+//        }
+//      }
+//    }
+//    return best;
+//}
+//
+//
+//static Agedge_t *inter_tree_edge_search_iter(Agnode_t *v, Agnode_t *from, Agedge_t *best)
+//{
+//    // TODO: handle null
+//    IntTreeEdgeStack *stack = new_int_tree_edge_search_stack(2);
+//    
+//    push_ite_stack(stack, (IntTreeEdgeSpace){
+//        .v = v, 
+//        .from = from, 
+//    });
+//
+//    while (stack->len > 0)
+//    {
+//        if (best && SLACK(best) == 0) return best;
+//        IntTreeEdgeSpace item;
+//
+//        pop_ite_stack(stack, &item);
+//
+//        best = search2(stack, item.v, item.from, best);
+//
+//    }
+//    
+//    free_int_tree_edge_stack(stack);
+//    return best;
+//}
+
+static Agedge_t *inter_tree_edge_search_iter(Agnode_t *v, Agnode_t *from, Agedge_t *best, IntTreeEdgeStack *stack)
+{
+    if (best && SLACK(best) == 0) return best;
+    
+    push_ite_stack(stack, (IntTreeEdgeSpace){
+        .v = v, 
+        .from = from, 
+        .out_i = 0, 
+        .in_i = 0, 
+        .processing_out = true
+    });
+
+    while (stack->len != 0) {
+        if (best && SLACK(best) == 0) break;
+
+        IntTreeEdgeSpace *space;
+        last_ite_stack(stack, &space);
+        
+        Agnode_t *vc = space->v;
+        Agnode_t *fromc = space->from;
+        subtree_t *ts = STsetFind(vc);
+        
+        Agedge_t *e;
+        bool pushed = false;
+        
+        if (space->processing_out) {
+            for (int i = space->out_i; (e = ND_out(vc).list[i]); i++) {
+                if (TREE_EDGE(e)) {
+                    if (aghead(e) == fromc) continue;
+                    
+                    push_ite_stack(stack, (IntTreeEdgeSpace){
+                        .v = aghead(e), 
+                        .from = vc, 
+                        .out_i = 0, 
+                        .in_i = 0, 
+                        .processing_out = true
+                    });
+                    space->out_i = i + 1;
+                    pushed = true;
+                    break;
+                }
+                else {
+                    if (STsetFind(aghead(e)) != ts) {
+                        if (best == 0 || SLACK(e) < SLACK(best)) 
+                            best = e;
+                    }
+                }
+            }
+            
+            if (!pushed) {
+                space->processing_out = false;
+                continue;
+            }
+        }
+        
+        if (!pushed && !space->processing_out) {
+            for (int i = space->in_i; (e = ND_in(vc).list[i]); i++) {
+                if (TREE_EDGE(e)) {
+                    if (agtail(e) == fromc) continue;
+                    
+                    push_ite_stack(stack, (IntTreeEdgeSpace){
+                        .v = agtail(e), 
+                        .from = vc, 
+                        .out_i = 0, 
+                        .in_i = 0, 
+                        .processing_out = true
+                    });
+                    space->in_i = i + 1;
+                    pushed = true;
+                    break;
+                }
+                else {
+                    if (STsetFind(agtail(e)) != ts) {
+                        if (best == 0 || SLACK(e) < SLACK(best)) 
+                            best = e;
+                    }
+                }
+            }
+            
+            if (!pushed) {
+                remove_last_ite_stack(stack);
+            }
+        }
+    }
+    
+    return best;
+}
+
 static Agedge_t *inter_tree_edge(subtree_t *tree)
 {
     Agedge_t *rv;
-    rv = inter_tree_edge_search(tree->rep, NULL, NULL);
+
+    IntTreeEdgeStack *stack = new_ite_stack(2);
+    if (!stack) return rv;
+
+    rv = inter_tree_edge_search_iter(tree->rep, NULL, NULL, stack);
+
+    free_ite_stack(stack);
     return rv;
 }
 
@@ -546,6 +968,76 @@ subtree_t *STextractmin(STheap_t *heap)
     return rv;
 }
 
+typedef struct {
+    Agnode_t *v;
+    Agnode_t *from;
+} TreeAdjustSpace;
+
+typedef struct {
+    TreeAdjustSpace *data;
+    size_t len;
+    size_t capacity;
+} TreeAdjustStack;
+
+TreeAdjustStack *new_ta_stack(size_t capacity) {
+    TreeAdjustStack *stack = malloc(sizeof(TreeAdjustStack));
+    
+    if (!stack) return NULL;
+
+    stack->data = malloc(sizeof(TreeAdjustSpace) * capacity);
+    
+    if (!stack->data && capacity > 0) {
+        free(stack);
+        return NULL;
+    }
+
+    stack->len = 0;
+    stack->capacity = capacity;
+
+    return stack;
+}
+
+void free_ta_stack(TreeAdjustStack *stack) {
+    if (!stack) return;
+    
+    if (stack->data) {
+        free(stack->data);
+    }
+    
+    free(stack);
+}
+
+int push_ta_stack(TreeAdjustStack *stack, TreeAdjustSpace item) {
+    if (stack->len == stack->capacity) {
+        size_t new_cap = (stack->capacity == 0) ? 1 : stack->capacity * 2;
+        
+        TreeAdjustSpace *new_data = realloc(stack->data, new_cap * sizeof(TreeAdjustSpace));
+        
+        if (!new_data) {
+            return -1;
+        }
+        
+        stack->data = new_data;
+        stack->capacity = new_cap;
+    }
+
+    stack->data[stack->len] = item;
+    stack->len += 1;
+
+    return 0;
+}
+
+int pop_ta_stack(TreeAdjustStack *stack, TreeAdjustSpace *item) {
+    if (stack->len == 0) {
+        return -1;
+    }
+    else {
+        *item = stack->data[(stack->len) - 1];
+        stack->len -= 1;
+        return 0;
+    }
+}
+
 static
 void tree_adjust(Agnode_t *v, Agnode_t *from, int delta)
 {
@@ -566,6 +1058,44 @@ void tree_adjust(Agnode_t *v, Agnode_t *from, int delta)
 }
 
 static
+void tree_adjust_iter(Agnode_t *v, Agnode_t *from, int delta, TreeAdjustStack *stack)
+{   
+    push_ta_stack(stack, (TreeAdjustSpace){
+        .v = v,
+        .from = from
+    });
+
+    while (stack->len != 0) {
+        TreeAdjustSpace item;
+        pop_ta_stack(stack, &item);
+
+        int i;
+        Agedge_t *e;
+        Agnode_t *w;
+        
+        ND_rank(item.v) = ND_rank(item.v) + delta;
+        
+        for (i = 0; (e = ND_tree_in(item.v).list[i]); i++) {
+            w = agtail(e);
+            if (w != item.from)
+                push_ta_stack(stack, (TreeAdjustSpace) {
+                    .v = w,
+                    .from = item.v
+                });
+        }
+        
+        for (i = 0; (e = ND_tree_out(item.v).list[i]); i++) {
+            w = aghead(e);
+            if (w != item.from)
+                push_ta_stack(stack, (TreeAdjustSpace) {
+                    .v = w,
+                    .from = item.v
+                });
+        }   
+    }
+}
+
+static
 subtree_t *merge_trees(network_simplex_ctx_t *ctx, Agedge_t *e)   /* entering tree edge */
 {
   int       delta;
@@ -576,20 +1106,29 @@ subtree_t *merge_trees(network_simplex_ctx_t *ctx, Agedge_t *e)   /* entering tr
   t0 = STsetFind(agtail(e));
   t1 = STsetFind(aghead(e));
 
+  TreeAdjustStack *stack = new_ta_stack(2);
+  assert(stack);
+
   if (!on_heap(t0)) { // move t0
     delta = SLACK(e);
-    if (delta != 0)
-      tree_adjust(t0->rep,NULL,delta);
+    if (delta != 0) {
+        tree_adjust_iter(t0->rep,NULL,delta, stack);
+        stack->len = 0;
+    }
   }
   else {  // move t1
     delta = -SLACK(e);
-    if (delta != 0)
-      tree_adjust(t1->rep,NULL,delta);
+    if (delta != 0) {
+        tree_adjust_iter(t1->rep,NULL,delta, stack);
+        stack->len = 0;
+    }
   }
   if (add_tree_edge(ctx, e) != 0) {
     return NULL;
   }
   rv = STsetUnion(t0,t1);
+
+  free_ta_stack(stack);
   
   return rv;
 }
@@ -674,6 +1213,74 @@ static Agnode_t *treeupdate(Agnode_t * v, Agnode_t * w, int cutvalue, int dir)
     }
     return v;
 }
+typedef struct {
+    Agnode_t *v;
+} RerankSpace;
+
+typedef struct {
+    RerankSpace *data;
+    size_t len;
+    size_t capacity;
+} RerankStack;
+
+RerankStack *new_rerank_iter_stack(size_t capacity) {
+    RerankStack *stack = malloc(sizeof(RerankStack));
+    
+    if (!stack) return NULL;
+
+    stack->data = malloc(sizeof(RerankSpace) * capacity);
+    
+    if (!stack->data && capacity > 0) {
+        free(stack);
+        return NULL;
+    }
+
+    stack->len = 0;
+    stack->capacity = capacity;
+
+    return stack;
+}
+
+void free_rerank_iter_stack(RerankStack *stack) {
+    if (!stack) return;
+    
+    if (stack->data) {
+        free(stack->data);
+    }
+    
+    free(stack);
+}
+
+int push_rerank_iter_stack(RerankStack *stack, RerankSpace item) {
+    if (stack->len == stack->capacity) {
+        size_t new_cap = (stack->capacity == 0) ? 1 : stack->capacity * 2;
+        
+        RerankSpace *new_data = realloc(stack->data, new_cap * sizeof(RerankSpace));
+        
+        if (!new_data) {
+            return -1;
+        }
+        
+        stack->data = new_data;
+        stack->capacity = new_cap;
+    }
+
+    stack->data[stack->len] = item;
+    stack->len += 1;
+
+    return 0;
+}
+
+int pop_rerank_iter_stack(RerankStack *stack, RerankSpace *item) {
+    if (stack->len == 0) {
+        return -1;
+    }
+    else {
+        *item = stack->data[(stack->len) - 1];
+        stack->len -= 1;
+        return 0;
+    }
+}
 
 static void rerank(Agnode_t * v, int delta)
 {
@@ -689,6 +1296,40 @@ static void rerank(Agnode_t * v, int delta)
 	    rerank(agtail(e), delta);
 }
 
+static void rerank_iter(Agnode_t * v, int delta, RerankStack *stack)
+{
+    push_rerank_iter_stack(stack, (RerankSpace) {
+        .v = v
+    });
+
+    while (stack->len != 0) {
+
+        int i;
+        edge_t *e;
+
+        RerankSpace item;
+        pop_rerank_iter_stack(stack, &item);
+
+        ND_rank(item.v) -= delta;
+        for (i = 0; (e = ND_tree_out(item.v).list[i]); i++) {
+	        if (e != ND_par(item.v)) {
+                push_rerank_iter_stack(stack, (RerankSpace) {
+                    .v = aghead(e)
+                });
+            }
+        }
+        for (i = 0; (e = ND_tree_in(item.v).list[i]); i++) {
+	        if (e != ND_par(item.v)) {
+                push_rerank_iter_stack(stack, (RerankSpace) {
+                    .v = agtail(e)
+                });
+            }
+        }
+    }
+
+    return;
+}
+
 /* e is the tree edge that is leaving and f is the nontree edge that
  * is entering.  compute new cut values, ranks, and exchange e and f.
  */
@@ -700,22 +1341,36 @@ update(network_simplex_ctx_t *ctx, edge_t * e, edge_t * f)
 
     delta = SLACK(f);
     /* "for (v = in nodes in tail side of e) do ND_rank(v) -= delta;" */
+
+    RerankStack *stack = new_rerank_iter_stack(2);
+    assert(stack);
+
     if (delta > 0) {
-	size_t s = ND_tree_in(agtail(e)).size + ND_tree_out(agtail(e)).size;
-	if (s == 1)
-	    rerank(agtail(e), delta);
-	else {
-	    s = ND_tree_in(aghead(e)).size + ND_tree_out(aghead(e)).size;
-	    if (s == 1)
-		rerank(aghead(e), -delta);
+	    size_t s = ND_tree_in(agtail(e)).size + ND_tree_out(agtail(e)).size;
+	    if (s == 1) {
+	        rerank_iter(agtail(e), delta, stack);
+            stack->len = 0;
+        }
 	    else {
-		if (ND_lim(agtail(e)) < ND_lim(aghead(e)))
-		    rerank(agtail(e), delta);
-		else
-		    rerank(aghead(e), -delta);
+	        s = ND_tree_in(aghead(e)).size + ND_tree_out(aghead(e)).size;
+	        if (s == 1) {
+	        	rerank_iter(aghead(e), -delta, stack);
+                stack->len = 0;
+            }
+	        else {
+	    	    if (ND_lim(agtail(e)) < ND_lim(aghead(e))) {
+	    	        rerank_iter(agtail(e), delta, stack);
+                    stack->len = 0;
+                }
+	    	    else {
+	    	        rerank_iter(aghead(e), -delta, stack);
+                    stack->len = 0;
+                }
+	        }
 	    }
-	}
     }
+
+    free_rerank_iter_stack(stack);
 
     cutvalue = ED_cutvalue(e);
     lca = treeupdate(agtail(f), aghead(f), cutvalue, 1);
@@ -774,22 +1429,33 @@ static void LR_balance(network_simplex_ctx_t *ctx)
     int delta;
     edge_t *e, *f;
 
+    RerankStack *stack = new_rerank_iter_stack(2);
+    assert(stack);
+
     for (size_t i = 0; i < edge_list_size(&ctx->Tree_edge); i++) {
-	e = edge_list_get(&ctx->Tree_edge, i);
-	if (ED_cutvalue(e) == 0) {
-	    f = enter_edge(e);
-	    if (f == NULL)
-		continue;
-	    delta = SLACK(f);
-	    if (delta <= 1)
-		continue;
-	    if (ND_lim(agtail(e)) < ND_lim(aghead(e)))
-		rerank(agtail(e), delta / 2);
-	    else
-		rerank(aghead(e), -delta / 2);
-	}
+	    e = edge_list_get(&ctx->Tree_edge, i);
+	    
+        if (ED_cutvalue(e) == 0) {
+	        f = enter_edge(e);
+	        
+            if (f == NULL)
+		        continue;
+	        delta = SLACK(f);
+	        
+            if (delta <= 1)
+		        continue;
+	        if (ND_lim(agtail(e)) < ND_lim(aghead(e))) {
+		        rerank_iter(agtail(e), delta / 2, stack);
+                stack->len = 0;
+            }
+	        else {
+		        rerank_iter(aghead(e), -delta / 2, stack);
+                stack->len = 0;
+            }
+	    }
     }
     freeTreeList(ctx, ctx->G);
+    free_rerank_iter_stack(stack);
 }
 
 static int decreasingrankcmpf(const node_t **x, const node_t **y) {
@@ -1057,36 +1723,6 @@ int rank(graph_t * g, int balance, int maxiter)
     return rank2 (g, balance, maxiter, search_size);
 }
 
-/* set cut value of f, assuming values of edges on one side were already set */
-static void x_cutval(edge_t * f)
-{
-    node_t *v;
-    edge_t *e;
-    int i, sum, dir;
-
-    /* set v to the node on the side of the edge already searched */
-    if (ND_par(agtail(f)) == f) {
-	v = agtail(f);
-	dir = 1;
-    } else {
-	v = aghead(f);
-	dir = -1;
-    }
-
-    sum = 0;
-    for (i = 0; (e = ND_out(v).list[i]); i++)
-	if (sadd_overflow(sum, x_val(e, v, dir), &sum)) {
-	    agerrorf("overflow when computing edge weight sum\n");
-	    graphviz_exit(EXIT_FAILURE);
-	}
-    for (i = 0; (e = ND_in(v).list[i]); i++)
-	if (sadd_overflow(sum, x_val(e, v, dir), &sum)) {
-	    agerrorf("overflow when computing edge weight sum\n");
-	    graphviz_exit(EXIT_FAILURE);
-	}
-    ED_cutvalue(f) = sum;
-}
-
 static int x_val(edge_t * e, node_t * v, int dir)
 {
     node_t *other;
@@ -1123,21 +1759,6 @@ static int x_val(edge_t * e, node_t * v, int dir)
     if (d < 0)
 	rv = -rv;
     return rv;
-}
-
-static void dfs_cutval(node_t * v, edge_t * par)
-{
-    int i;
-    edge_t *e;
-
-    for (i = 0; (e = ND_tree_out(v).list[i]); i++)
-	if (e != par)
-	    dfs_cutval(aghead(e), e);
-    for (i = 0; (e = ND_tree_in(v).list[i]); i++)
-	if (e != par)
-	    dfs_cutval(agtail(e), e);
-    if (par)
-	x_cutval(par);
 }
 
 /// local state used by `dfs_range*`
